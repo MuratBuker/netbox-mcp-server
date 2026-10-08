@@ -2,6 +2,8 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from netbox_mcp_server.server import (
     DEFAULT_CHANGELOG_FIELDS,
     compact,
@@ -86,3 +88,9 @@ def test_search_without_fields_uses_brief(mock_netbox):
     params = mock_netbox.get.call_args[1]["params"]
     assert params["brief"] == "1"
     assert "fields" not in params
+
+
+def test_changelogs_reject_time_lookups_netbox_ignores():
+    """time__gte is silently ignored by NetBox, returning all history; reject it."""
+    with pytest.raises(ValueError, match="time_after"):
+        netbox_get_changelogs({"time__gte": "2026-10-08T00:00:00Z"})

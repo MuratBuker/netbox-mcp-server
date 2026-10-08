@@ -533,6 +533,8 @@ def netbox_get_changelogs(
     - action: Filter by action type (created, updated, deleted)
     - time_before: Filter for changes made before a given time (ISO 8601 format)
     - time_after: Filter for changes made after a given time (ISO 8601 format)
+      Use time_after/time_before for date ranges; lookups like time__gte are rejected
+      because NetBox would silently ignore them and return the entire change history.
     - q: Search term to filter by object representation
 
     Examples:
@@ -561,6 +563,13 @@ def netbox_get_changelogs(
     - time: The timestamp when the change was made
     """
     endpoint = "core/object-changes"
+
+    invalid_time_filters = [name for name in filters if name.startswith("time__")]
+    if invalid_time_filters:
+        raise ValueError(
+            f"Unsupported changelog filter(s) {invalid_time_filters}: NetBox ignores them. "
+            "Use 'time_after' and/or 'time_before' (ISO 8601) instead."
+        )
 
     params = {**filters, "limit": limit, "offset": offset}
     if fields is None:
