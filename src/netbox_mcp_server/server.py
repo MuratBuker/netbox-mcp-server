@@ -340,6 +340,11 @@ def validate_filters(filters: dict) -> None:
                   - IP addresses: 'ipam.ipaddress' {'virtual_machine_id': id} or
                     {'device_id': id}
 
+                Custom fields are nested under 'custom_fields' ({'custom_fields': {'x': ...}}),
+                never top-level. Include 'custom_fields' in fields to get them; filter with
+                'cf_<name>' (e.g. {'cf_account_id': 'A123'}). List the defined custom fields
+                with object_type 'extras.customfield'.
+
         fields: Optional list of specific fields to return
                 **IMPORTANT: ALWAYS USE THIS PARAMETER TO MINIMIZE TOKEN USAGE**
                 Field filtering significantly reduces response payload and is critical for performance.
