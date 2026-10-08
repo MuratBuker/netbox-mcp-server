@@ -21,7 +21,8 @@ For chat, use cases, and general MCP discussion, join the NetBox community at [n
 |------|-------------|
 | get_objects | Retrieves NetBox core objects based on their type and filters |
 | get_object_by_id | Gets detailed information about a specific NetBox object by its ID |
-| get_changelogs | Retrieves change history records (audit trail) based on filters |
+| get_changelogs | Retrieves change history records (audit trail) based on filters, paginated (default 5) |
+| search_objects | Free-text search across common object types (devices, sites, IPs, VMs, …), returns brief objects by default |
 
 > Note: Core NetBox object types are always available. Plugin object types can be auto-discovered. See [Plugin Object Type Discovery](#plugin-object-type-discovery). Advanced features (GraphQL, dynamic model discovery, etc.) are deliberately out of scope. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full scope statement and rationale.
 
@@ -137,12 +138,12 @@ Add the server configuration to your Claude Desktop config file. On Mac, edit `~
 Both `netbox_get_objects()` and `netbox_get_object_by_id()` support an optional `fields` parameter to reduce token usage:
 
 ```python
-# Without fields: ~5000 tokens for 50 devices
-devices = netbox_get_objects('devices', {'site': 'datacenter-1'})
+# Without fields: ~3,500 tokens for 5 full devices (~70K for limit=100)
+devices = netbox_get_objects('dcim.device', {'site': 'datacenter-1'})
 
-# With fields: ~500 tokens (90% reduction)
+# With fields: ~100 tokens
 devices = netbox_get_objects(
-    'devices',
+    'dcim.device',
     {'site': 'datacenter-1'},
     fields=['id', 'name', 'status', 'site']
 )
@@ -162,7 +163,16 @@ The `fields` parameter uses NetBox's native field filtering. See the [NetBox API
 **Token-saving defaults:**
 
 - `netbox_search_objects()` returns brief objects unless `fields` is given.
-- `netbox_get_changelogs()` returns 5 entries (`limit`/`offset` to page) with summary fields only. Pass `fields` including `prechange_data`/`postchange_data` to see what changed, or `fields=[]` for full entries.
+- `netbox_get_changelogs()` returns 5 entries (`limit`/`offset` to page) with summary fields only. Pass `fields` including `prechange_data`/`postchange_data` to see what changed, or `fields=[]` for full entries. Use `time_after`/`time_before` for date ranges; `time__gte`-style lookups are rejected because NetBox ignores them and returns the entire history.
+
+**Counting:** use `limit=1, fields=['id']` and read `count` instead of paging through results.
+
+**Child objects** are separate object types queried by parent id, not fields of the parent (a VM's `disk` is only a total):
+
+```python
+netbox_get_objects('virtualization.virtualdisk', {'virtual_machine_id': 123}, fields=['name', 'size'])
+netbox_get_objects('dcim.interface', {'device_id': 45}, fields=['name', 'enabled'])
+```
 
 ## Configuration
 
