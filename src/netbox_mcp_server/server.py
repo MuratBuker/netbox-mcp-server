@@ -191,8 +191,51 @@ DEFAULT_SEARCH_TYPES = [
     "virtualization.virtualmachine",  # VM names
 ]
 
+# Default changelog fields: omits the bulky before/after object snapshots
+DEFAULT_CHANGELOG_FIELDS = [
+    "id",
+    "time",
+    "user_name",
+    "action",
+    "changed_object_type",
+    "changed_object_id",
+    "object_repr",
+]
+
 mcp = FastMCP("NetBox")
 netbox = None
+
+
+def compact(data: Any) -> Any:
+    """Recursively drop API link fields and empty values to save LLM tokens.
+
+    Removes 'url' and 'display_url' keys and any None, "", [] or {} values.
+    Measured on a production NetBox, this halves the size of full objects.
+
+    Args:
+        data: A NetBox API object, or a list/scalar nested within one
+
+    Returns:
+        The same data without link fields and empty values
+    """
+    if isinstance(data, list):
+        return [compact(item) for item in data]
+    if not isinstance(data, dict):
+        return data
+    result = {}
+    for key, value in data.items():
+        if key in ("url", "display_url"):
+            continue
+        value = compact(value)
+        if value is None or value in ("", [], {}):
+            continue
+        result[key] = value
+    return result
+
+
+def compact_page(response: dict) -> dict:
+    """Compact each object in a paginated response, keeping the page envelope."""
+    return {**response, "results": compact(response.get("results", []))}
 
 
 def validate_filters(filters: dict) -> None:
@@ -297,7 +340,8 @@ def validate_filters(filters: dict) -> None:
                 - ['id', 'name'] = returns only specified fields (RECOMMENDED)
 
                 Examples:
-                - For counting: ['id'] (minimal payload)
+                - For counting: limit=1, fields=['id'], then read 'count'
+                  (never page through results just to count them)
                 - For listings: ['id', 'name', 'status']
                 - For IP addresses: ['address', 'dns_name', 'description']
 
@@ -336,6 +380,9 @@ def validate_filters(filters: dict) -> None:
                        ALWAYS REFER TO THIS FIELD FOR THE OBJECTS ON THIS PAGE
 
     ENSURE YOU ARE AWARE THE RESULTS ARE PAGINATED BEFORE PROVIDING RESPONSE TO THE USER.
+
+    Empty fields (null, "", [], {}) and API link fields (url, display_url) are omitted
+    from each object to save tokens; an absent field means it is empty.
 
     Valid object_type values:
 
@@ -387,7 +434,7 @@ def netbox_get_objects(
             params["ordering"] = ordering
 
     # Make API call
-    return netbox.get(endpoint, params=params, fallback_endpoint=fallback)
+    return compact_page(netbox.get(endpoint, params=params, fallback_endpoint=fallback))
 
 
 @mcp.tool
@@ -440,16 +487,30 @@ def netbox_get_object_by_id(
     if brief:
         params["brief"] = "1"
 
-    return netbox.get(full_endpoint, params=params, fallback_endpoint=full_fallback)
+    return compact(netbox.get(full_endpoint, params=params, fallback_endpoint=full_fallback))
 
 
 @mcp.tool
-def netbox_get_changelogs(filters: dict):
+def netbox_get_changelogs(
+    filters: dict,
+    fields: list[str] | None = None,
+    limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
+    offset: Annotated[int, Field(default=0, ge=0)] = 0,
+):
     """
     Get object change records (changelogs) from NetBox based on filters.
 
     Args:
         filters: dict of filters to apply to the API call based on the NetBox API filtering options
+        fields: Fields to return for each entry.
+                - None (default) = summary fields only, without object snapshots:
+                  id, time, user_name, action, changed_object_type,
+                  changed_object_id, object_repr
+                - Add 'prechange_data' / 'postchange_data' to the list only when you
+                  need the actual values that changed (they are large)
+                - [] = all fields
+        limit: Maximum entries to return (default 5, max 100)
+        offset: Skip this many entries for pagination (default 0)
 
     Returns:
         Paginated response dict with the following structure:
@@ -501,8 +562,13 @@ def netbox_get_changelogs(filters: dict):
     """
     endpoint = "core/object-changes"
 
-    # Make API call
-    return netbox.get(endpoint, params=filters)
+    params = {**filters, "limit": limit, "offset": offset}
+    if fields is None:
+        fields = DEFAULT_CHANGELOG_FIELDS
+    if fields:
+        params["fields"] = ",".join(fields)
+
+    return compact_page(netbox.get(endpoint, params=params))
 
 
 @mcp.tool(
@@ -521,7 +587,7 @@ def netbox_get_changelogs(filters: dict):
     + """]
                      Examples: ['dcim.device', 'ipam.ipaddress', 'dcim.site']
         fields: Optional list of specific fields to return (reduces response size) IT IS STRONGLY RECOMMENDED TO USE THIS PARAMETER TO MINIMIZE TOKEN USAGE.
-                - None or [] = returns all fields (no filtering)
+                - None or [] = brief representation of each object (id, name/display, etc.)
                 - ['id', 'name'] = returns only specified fields
                 Examples: ['id', 'name', 'status'], ['address', 'dns_name']
                 Uses NetBox's native field filtering via ?fields= parameter
@@ -578,17 +644,14 @@ def netbox_search_objects(
     for obj_type in search_types:
         try:
             endpoint, fallback = _get_endpoint_info(obj_type)
-            response = netbox.get(
-                endpoint,
-                params={
-                    "q": query,
-                    "limit": limit,
-                    "fields": ",".join(fields) if fields else None,
-                },
-                fallback_endpoint=fallback,
-            )
+            params = {"q": query, "limit": limit}
+            if fields:
+                params["fields"] = ",".join(fields)
+            else:
+                params["brief"] = "1"
+            response = netbox.get(endpoint, params=params, fallback_endpoint=fallback)
             # Extract results array from paginated response
-            results[obj_type] = response.get("results", [])
+            results[obj_type] = compact(response.get("results", []))
         except Exception:  # noqa: S112 - intentional error-resilient search
             # Continue searching other types if one fails
             # results[obj_type] already has empty list

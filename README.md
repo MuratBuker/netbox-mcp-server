@@ -157,6 +157,13 @@ devices = netbox_get_objects(
 
 The `fields` parameter uses NetBox's native field filtering. See the [NetBox API documentation](https://docs.netbox.dev/en/stable/integrations/rest-api/) for details.
 
+**Automatic response compaction:** all tools omit `url`/`display_url` links and empty values (`null`, `""`, `[]`, `{}`) from returned objects, roughly halving the size of full objects. An absent field means it is empty.
+
+**Token-saving defaults:**
+
+- `netbox_search_objects()` returns brief objects unless `fields` is given.
+- `netbox_get_changelogs()` returns 5 entries (`limit`/`offset` to page) with summary fields only. Pass `fields` including `prechange_data`/`postchange_data` to see what changed, or `fields=[]` for full entries.
+
 ## Configuration
 
 The server supports multiple configuration sources with the following precedence (highest to lowest):
