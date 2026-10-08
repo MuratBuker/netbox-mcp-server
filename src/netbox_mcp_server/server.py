@@ -332,6 +332,14 @@ def validate_filters(filters: dict) -> None:
                   sites = netbox_get_objects('dcim.site', {'name': 'NYC'})
                   netbox_get_objects('dcim.device', {'site_id': sites[0]['id']})
 
+                Child objects are separate object types, not fields of their parent.
+                Query them by parent id:
+                  - VM disks: 'virtualization.virtualdisk' {'virtual_machine_id': id}
+                  - VM interfaces: 'virtualization.vminterface' {'virtual_machine_id': id}
+                  - Device interfaces: 'dcim.interface' {'device_id': id}
+                  - IP addresses: 'ipam.ipaddress' {'virtual_machine_id': id} or
+                    {'device_id': id}
+
         fields: Optional list of specific fields to return
                 **IMPORTANT: ALWAYS USE THIS PARAMETER TO MINIMIZE TOKEN USAGE**
                 Field filtering significantly reduces response payload and is critical for performance.
@@ -469,6 +477,10 @@ def netbox_get_object_by_id(
 
     Returns:
         Object dict (complete or with only requested fields based on fields parameter)
+
+    Child objects (VM disks/interfaces, device interfaces, IPs) are not included;
+    fields like a VM's 'disk' are totals. Use netbox_get_objects with the parent id
+    (e.g. 'virtualization.virtualdisk' with {'virtual_machine_id': id}) to list them.
     """
     # Validate object_type exists in mapping
     if object_type not in NETBOX_OBJECT_TYPES:
