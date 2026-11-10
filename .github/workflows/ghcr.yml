@@ -1,0 +1,38 @@
+name: GHCR image (feat/token-efficiency)
+
+# Every push to the branch -> ghcr.io/muratbuker/netbox-mcp-server:sha-<commit> and :token-efficiency.
+# Supernova pins the sha tag in MCP Services/k8s/netbox-mcp.yaml.
+on:
+  push:
+    branches: [feat/token-efficiency]
+  workflow_dispatch:
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/muratbuker/netbox-mcp-server
+          tags: |
+            type=sha
+            type=raw,value=token-efficiency
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
