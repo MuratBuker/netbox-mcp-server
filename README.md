@@ -147,6 +147,17 @@ devices = netbox_get_objects(
 )
 ```
 
+NetBox's `?fields=` only selects top-level fields. Dotted paths pick nested keys, which keeps custom fields cheap on large listings (`'custom_fields'` alone returns every custom field of every object):
+
+```python
+vms = netbox_get_objects(
+    "virtualization.virtualmachine",
+    {"tenant_id": 445},
+    fields=["id", "name", "platform.name", "custom_fields.vm_os_kernel"],
+    limit=100,
+)
+```
+
 **Common field patterns:**
 
 - **Devices:** `['id', 'name', 'status', 'device_type', 'site', 'primary_ip4']`

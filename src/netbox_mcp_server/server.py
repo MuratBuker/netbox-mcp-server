@@ -240,6 +240,39 @@ def compact_page(response: dict) -> dict:
     return {**response, "results": compact(response.get("results", []))}
 
 
+def api_fields(fields: list[str]) -> str:
+    """Build NetBox's ?fields= value; it only selects top-level fields.
+
+    'custom_fields.vm_os_kernel' asks NetBox for 'custom_fields'; select_fields()
+    then trims the response to the requested key.
+    """
+    return ",".join(dict.fromkeys(field.split(".", 1)[0] for field in fields))
+
+
+def select_fields(obj: Any, fields: list[str]) -> Any:
+    """Keep only the requested (possibly dotted) field paths of an object.
+
+    Args:
+        obj: A NetBox object (non-dict values are returned unchanged)
+        fields: Field paths like ['id', 'custom_fields.vm_os_kernel', 'platform.name']
+
+    Returns:
+        The object with only the requested paths; missing paths are skipped
+    """
+    if not isinstance(obj, dict):
+        return obj
+    result: dict = {}
+    for field in fields:
+        head, _, rest = field.partition(".")
+        if head not in obj:
+            continue
+        value = obj[head] if not rest else select_fields(obj[head], [rest])
+        if isinstance(value, dict) and isinstance(result.get(head), dict):
+            value = {**result[head], **value}
+        result[head] = value
+    return result
+
+
 def _loads_if_json(value: Any) -> Any:
     """Decode a JSON-encoded string argument; return anything else unchanged.
 
@@ -386,9 +419,14 @@ def validate_filters(filters: dict) -> None:
                   (never page through results just to count them)
                 - For listings: ['id', 'name', 'status']
                 - For IP addresses: ['address', 'dns_name', 'description']
+                - Nested keys via dotted paths:
+                  ['id', 'name', 'platform.name', 'custom_fields.vm_os_kernel']
 
                 Uses NetBox's native field filtering via ?fields= parameter.
                 **Always specify only the fields you actually need.**
+                **Never request the whole 'custom_fields' when listing many objects:
+                name the keys you need ('custom_fields.<name>'); the full set can
+                exceed the model's context window.**
 
         brief: returns only a minimal representation of each object in the response.
                This is useful when you need only a list of available objects without any related data.
@@ -464,7 +502,7 @@ def netbox_get_objects(
     params["offset"] = offset
 
     if fields:
-        params["fields"] = ",".join(fields)
+        params["fields"] = api_fields(fields)
 
     if brief:
         params["brief"] = "1"
@@ -476,7 +514,10 @@ def netbox_get_objects(
             params["ordering"] = ordering
 
     # Make API call
-    return compact_page(netbox.get(endpoint, params=params, fallback_endpoint=fallback))
+    page = compact_page(netbox.get(endpoint, params=params, fallback_endpoint=fallback))
+    if fields and any("." in field for field in fields):
+        page["results"] = [select_fields(obj, fields) for obj in page["results"]]
+    return page
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
@@ -503,6 +544,7 @@ def netbox_get_object_by_id(
                 - For basic info: ['id', 'name', 'status']
                 - For devices: ['id', 'name', 'status', 'site']
                 - For IP addresses: ['address', 'dns_name', 'vrf', 'status']
+                - Nested keys via dotted paths: ['name', 'custom_fields.vm_os_kernel']
 
                 Uses NetBox's native field filtering via ?fields= parameter.
                 **Always specify only the fields you actually need.**
@@ -528,12 +570,15 @@ def netbox_get_object_by_id(
 
     params = {}
     if fields:
-        params["fields"] = ",".join(fields)
+        params["fields"] = api_fields(fields)
 
     if brief:
         params["brief"] = "1"
 
-    return compact(netbox.get(full_endpoint, params=params, fallback_endpoint=full_fallback))
+    obj = compact(netbox.get(full_endpoint, params=params, fallback_endpoint=full_fallback))
+    if fields and any("." in field for field in fields):
+        obj = select_fields(obj, fields)
+    return obj
 
 
 @mcp.tool(annotations={"readOnlyHint": True})

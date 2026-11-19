@@ -10,6 +10,7 @@ from netbox_mcp_server.server import (
     netbox_get_changelogs,
     netbox_get_objects,
     netbox_search_objects,
+    select_fields,
 )
 
 EMPTY_PAGE = {"count": 0, "next": None, "previous": None, "results": []}
@@ -94,3 +95,37 @@ def test_changelogs_reject_time_lookups_netbox_ignores():
     """time__gte is silently ignored by NetBox, returning all history; reject it."""
     with pytest.raises(ValueError, match="time_after"):
         netbox_get_changelogs({"time__gte": "2026-10-08T00:00:00Z"})
+
+
+def test_dotted_fields_fetch_top_level_and_trim_nested_keys():
+    """custom_fields.x asks NetBox for custom_fields, then keeps only x."""
+    vm = {
+        "id": 7,
+        "name": "vm1",
+        "platform": {"id": 3, "name": "Linux", "slug": "linux"},
+        "custom_fields": {"vm_os_kernel": "5.14", "owner": "ops", "notes": "long text"},
+    }
+    page = {**EMPTY_PAGE, "count": 1, "results": [vm]}
+    fields = ["id", "name", "platform.name", "custom_fields.vm_os_kernel", "missing.key"]
+    with patch("netbox_mcp_server.server.netbox") as mock_netbox:
+        mock_netbox.get.return_value = page
+        result = netbox_get_objects("virtualization.virtualmachine", {}, fields=fields)
+
+    params = mock_netbox.get.call_args.kwargs["params"]
+    assert params["fields"] == "id,name,platform,custom_fields,missing"
+    assert result["results"] == [
+        {
+            "id": 7,
+            "name": "vm1",
+            "platform": {"name": "Linux"},
+            "custom_fields": {"vm_os_kernel": "5.14"},
+        }
+    ]
+    assert result["count"] == 1
+
+
+def test_select_fields_full_field_wins_over_dotted_path():
+    obj = {"custom_fields": {"a": 1, "b": 2}}
+    assert select_fields(obj, ["custom_fields.a", "custom_fields"]) == obj
+    assert select_fields(obj, ["custom_fields", "custom_fields.a"]) == obj
+    assert select_fields(obj, ["custom_fields.a", "custom_fields.b"]) == obj
