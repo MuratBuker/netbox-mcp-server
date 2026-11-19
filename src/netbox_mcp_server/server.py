@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import hashlib
 import hmac
+import json
 import logging
 import sys
 from typing import Annotated, Any
@@ -10,7 +11,7 @@ from urllib.parse import urlsplit
 import httpx
 from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, TokenVerifier
-from pydantic import Field, SecretStr
+from pydantic import BeforeValidator, Field, SecretStr
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 
@@ -239,6 +240,32 @@ def compact_page(response: dict) -> dict:
     return {**response, "results": compact(response.get("results", []))}
 
 
+def _loads_if_json(value: Any) -> Any:
+    """Decode a JSON-encoded string argument; return anything else unchanged.
+
+    Some MCP clients (e.g. Open WebUI via LiteLLM) send array/object arguments as
+    JSON strings like '["id", "name"]', which strict validation would reject.
+    """
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except ValueError:
+        return value
+
+
+def _as_str_list(value: Any) -> Any:
+    """Accept a list, a JSON-encoded list, or a comma-separated string."""
+    value = _loads_if_json(value)
+    if isinstance(value, str):
+        return [part.strip() for part in value.split(",") if part.strip()]
+    return value
+
+
+StrList = Annotated[list[str], BeforeValidator(_as_str_list)]
+JsonDict = Annotated[dict, BeforeValidator(_loads_if_json)]
+
+
 def validate_filters(filters: dict) -> None:
     """
     Validate that filters don't use unsupported lookup suffixes or multi-hop
@@ -410,8 +437,8 @@ def validate_filters(filters: dict) -> None:
 )
 def netbox_get_objects(
     object_type: str,
-    filters: dict,
-    fields: list[str] | None = None,
+    filters: JsonDict,
+    fields: StrList | None = None,
     brief: bool = False,
     limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
     offset: Annotated[int, Field(default=0, ge=0)] = 0,
@@ -456,7 +483,7 @@ def netbox_get_objects(
 def netbox_get_object_by_id(
     object_type: str,
     object_id: int,
-    fields: list[str] | None = None,
+    fields: StrList | None = None,
     brief: bool = False,
 ):
     """
@@ -511,8 +538,8 @@ def netbox_get_object_by_id(
 
 @mcp.tool(annotations={"readOnlyHint": True})
 def netbox_get_changelogs(
-    filters: dict,
-    fields: list[str] | None = None,
+    filters: JsonDict,
+    fields: StrList | None = None,
     limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
     offset: Annotated[int, Field(default=0, ge=0)] = 0,
 ):
@@ -653,8 +680,8 @@ def netbox_get_changelogs(
 )
 def netbox_search_objects(
     query: str,
-    object_types: list[str] | None = None,
-    fields: list[str] | None = None,
+    object_types: StrList | None = None,
+    fields: StrList | None = None,
     limit: Annotated[int, Field(default=5, ge=1, le=100)] = 5,
 ) -> dict[str, list[dict]]:
     """
