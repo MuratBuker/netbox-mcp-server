@@ -19,10 +19,10 @@ For chat, use cases, and general MCP discussion, join the NetBox community at [n
 
 | Tool | Description |
 |------|-------------|
-| get_objects | Retrieves NetBox core objects based on their type and filters |
-| get_object_by_id | Gets detailed information about a specific NetBox object by its ID |
-| get_changelogs | Retrieves change history records (audit trail) based on filters, paginated (default 5) |
-| search_objects | Free-text search across common object types (devices, sites, IPs, VMs, …), returns brief objects by default |
+| `netbox_get_objects` | Retrieves NetBox core objects based on their type and filters |
+| `netbox_get_object_by_id` | Gets detailed information about a specific NetBox object by its ID |
+| `netbox_get_changelogs` | Retrieves change history records (audit trail) based on filters, paginated (default 5) |
+| `netbox_search_objects` | Free-text search across common object types (devices, sites, IPs, VMs, …), returns brief objects by default |
 
 > Note: Core NetBox object types are always available. Plugin object types can be auto-discovered. See [Plugin Object Type Discovery](#plugin-object-type-discovery). Advanced features (GraphQL, dynamic model discovery, etc.) are deliberately out of scope. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full scope statement and rationale.
 
@@ -139,13 +139,11 @@ Both `netbox_get_objects()` and `netbox_get_object_by_id()` support an optional 
 
 ```python
 # Without fields: ~3,500 tokens for 5 full devices (~70K for limit=100)
-devices = netbox_get_objects('dcim.device', {'site': 'datacenter-1'})
+devices = netbox_get_objects("dcim.device", {"site": "datacenter-1"})
 
 # With fields: ~100 tokens
 devices = netbox_get_objects(
-    'dcim.device',
-    {'site': 'datacenter-1'},
-    fields=['id', 'name', 'status', 'site']
+    "dcim.device", {"site": "datacenter-1"}, fields=["id", "name", "status", "site"]
 )
 ```
 
@@ -170,8 +168,10 @@ The `fields` parameter uses NetBox's native field filtering. See the [NetBox API
 **Child objects** are separate object types queried by parent id, not fields of the parent (a VM's `disk` is only a total):
 
 ```python
-netbox_get_objects('virtualization.virtualdisk', {'virtual_machine_id': 123}, fields=['name', 'size'])
-netbox_get_objects('dcim.interface', {'device_id': 45}, fields=['name', 'enabled'])
+netbox_get_objects(
+    "virtualization.virtualdisk", {"virtual_machine_id": 123}, fields=["name", "size"]
+)
+netbox_get_objects("dcim.interface", {"device_id": 45}, fields=["name", "enabled"])
 ```
 
 ## Configuration

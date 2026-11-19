@@ -5,6 +5,7 @@ import hmac
 import logging
 import sys
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 import httpx
 from fastmcp import FastMCP
@@ -309,6 +310,7 @@ def validate_filters(filters: dict) -> None:
 
 
 @mcp.tool(
+    annotations={"readOnlyHint": True},
     description="""
     Get objects from NetBox based on their type and filters
 
@@ -330,7 +332,7 @@ def validate_filters(filters: dict) -> None:
 
                 Two-step pattern for cross-relationship queries:
                   sites = netbox_get_objects('dcim.site', {'name': 'NYC'})
-                  netbox_get_objects('dcim.device', {'site_id': sites[0]['id']})
+                  netbox_get_objects('dcim.device', {'site_id': sites['results'][0]['id']})
 
                 Child objects are separate object types, not fields of their parent.
                 Query them by parent id:
@@ -404,7 +406,7 @@ def validate_filters(filters: dict) -> None:
     + """
 
     See NetBox API documentation for filtering options for each object type.
-    """
+    """,
 )
 def netbox_get_objects(
     object_type: str,
@@ -450,7 +452,7 @@ def netbox_get_objects(
     return compact_page(netbox.get(endpoint, params=params, fallback_endpoint=fallback))
 
 
-@mcp.tool
+@mcp.tool(annotations={"readOnlyHint": True})
 def netbox_get_object_by_id(
     object_type: str,
     object_id: int,
@@ -507,7 +509,7 @@ def netbox_get_object_by_id(
     return compact(netbox.get(full_endpoint, params=params, fallback_endpoint=full_fallback))
 
 
-@mcp.tool
+@mcp.tool(annotations={"readOnlyHint": True})
 def netbox_get_changelogs(
     filters: dict,
     fields: list[str] | None = None,
@@ -579,6 +581,7 @@ def netbox_get_changelogs(
     - postchange_data: The object's data after the change (null for deletions)
     - time: The timestamp when the change was made
     """
+    validate_filters(filters)
     endpoint = "core/object-changes"
 
     invalid_time_filters = [name for name in filters if name.startswith("time__")]
@@ -598,6 +601,7 @@ def netbox_get_changelogs(
 
 
 @mcp.tool(
+    annotations={"readOnlyHint": True},
     description="""
     Perform global search across NetBox infrastructure.
 
@@ -645,7 +649,7 @@ def netbox_get_changelogs(
             object_types=['dcim.site', 'dcim.location'],
             fields=['id', 'name', 'status']
         )
-    """
+    """,
 )
 def netbox_search_objects(
     query: str,
@@ -724,6 +728,7 @@ def discover_plugin_types(client: NetBoxRestClient) -> dict[str, dict[str, str]]
         # Paginate through all object types
         offset = 0
         limit = 100
+        api_path = urlsplit(client.api_url).path.strip("/")
         while True:
             response = client.get(
                 "core/object-types",
@@ -756,6 +761,8 @@ def discover_plugin_types(client: NetBoxRestClient) -> dict[str, dict[str, str]]
                 # Convert REST URL to endpoint path:
                 # "/api/plugins/netbox-dns/zones/" -> "plugins/netbox-dns/zones"
                 endpoint = rest_url.strip("/")
+                if api_path and endpoint.startswith(f"{api_path}/"):
+                    endpoint = endpoint[len(api_path) + 1 :]
                 if endpoint.startswith("api/"):
                     endpoint = endpoint[4:]
 
@@ -768,9 +775,9 @@ def discover_plugin_types(client: NetBoxRestClient) -> dict[str, dict[str, str]]
                 }
 
             # Check if there are more pages
-            if not response.get("next"):
+            if not results or not response.get("next"):
                 break
-            offset += limit
+            offset += len(results)
 
     except (httpx.HTTPError, ValueError, KeyError) as e:
         logger.warning(f"Plugin discovery failed, continuing with core types only: {e}")
@@ -892,7 +899,7 @@ def main() -> None:
                 Middleware(
                     CORSMiddleware,
                     allow_origins=settings.cors_origins,
-                    allow_methods=["GET", "POST", "OPTIONS"],
+                    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
                     allow_headers=[
                         "Authorization",
                         "mcp-protocol-version",
